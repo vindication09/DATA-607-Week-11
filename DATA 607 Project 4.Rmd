@@ -1,0 +1,308 @@
+---
+title: "DATA 607 Project 4"
+author: "Vinicio Haro"
+date: "4/12/2018"
+output: html_document
+---
+
+It can be useful to be able to classify new "test" documents using already classified "training" documents.  A common example is using a corpus of labeled spam and ham (non-spam) e-mails to predict whether or not a new document is spam.  
+
+For this project, you can start with a spam/ham dataset, then predict the class of new documents (either withheld from the training dataset or from another source such as your own spam folder).   One example corpus:  https://spamassassin.apache.org/publiccorpus/
+
+```{r}
+library(tm)
+library(knitr)
+library(plyr)
+library(wordcloud)
+library(SnowballC)
+library(RTextTools)
+library(stringr)
+```
+
+
+The first thing we want to do is load in the data. Using this data, we want to construct a corpus and come up with a way to classsify the documents as spam or not spam. 
+
+Lets define the paths where the data will be stored on our local machine 
+```{r}
+easy_ham<-"/Users/vinicioharo/Desktop/DATA Science SPS/DATA 607/Week 10/corpus/easy_ham_2"
+hard_ham<-"/Users/vinicioharo/Desktop/DATA Science SPS/DATA 607/Week 10/corpus/hard_ham"
+spam<-"/Users/vinicioharo/Desktop/DATA Science SPS/DATA 607/Week 10/corpus/spam_2"
+```
+
+These are the URL's where the spam/ham folders are located. 
+We are going to select the most recent spam, which is spam 2, and easy/hard ham. 
+spam: "http://spamassassin.apache.org/old/publiccorpus/20030228_spam_2.tar.bz2"
+easy_ham: "http://spamassassin.apache.org/old/publiccorpus/20030228_easy_ham_2.tar.bz2"
+hard_ham: "http://spamassassin.apache.org/old/publiccorpus/20030228_hard_ham.tar.bz2"
+
+We can establish a directory to get each folder
+```{r}
+easy_ham_1<-DirSource(easy_ham)
+#Encoding(easy_ham_1) <- "latin1"
+hard_ham_1<-DirSource(hard_ham)
+#Encoding(hard_ham_1) <- "latin1"
+spam_1<-DirSource(spam)
+#Encoding(spam_1) <- "latin1"
+```
+
+This part proved to be more difficult for me. After several iterations, I ran into problems regarding the encoding of the documents. It stopped me from building a document matrix or even using the tm map function. Reading and processing the corpus using the following sequence of loops, allows me to get over that issue. We can also turn the data into a proper data frame which will prevent errors involving type list or type character. 
+
+Get the spam
+```{r}
+spam_corpus <- VCorpus(spam_1, readerControl=list(reader=readPlain))
+#spam_corpus <- sapply(spam_corpus,function(row) iconv(row, "latin1", "ASCII", sub=""))
+length(spam_1)
+```
+
+Get the easy ham
+```{r}
+easyham_corpus <- VCorpus(easy_ham_1, readerControl=list(reader=readPlain))
+#easyham_corpus <- sapply(easyham_corpus,function(row) iconv(row, "latin1", "ASCII", sub=""))
+length(easy_ham_1)
+```
+
+Get the hard ham
+```{r}
+hardham_corpus <- VCorpus(hard_ham_1, readerControl=list(reader=readPlain))
+#hardham_corpus <- sapply(hardham_corpus,function(row) iconv(row, "latin1", "ASCII", sub=""))
+length(hard_ham_1)
+```
+
+We need to now include some meta labels in order to identify the elements as spam, easy ham, and hard ham
+```{r}
+meta(spam_corpus, "filter") <- "spam"
+meta(easyham_corpus, "filter") <- "easy ham"
+meta(hardham_corpus, "filter") <- "hard ham"
+```
+
+We will partition the classification process into two parts:
+Part 1) easy ham vs spam
+Part 2) hard ham vs spam
+
+We will create the corpus for both parts 1 and 2 in the same sequence of steps.
+Anything labeled with a "B" pertains to part 2
+Lets proceed to part 1
+```{r}
+corpusA<-c(spam_corpus, easyham_corpus)
+#summary(corpusA)
+corpusB<-c(spam_corpus, hardham_corpus)
+```
+
+We can take a random sample of our corpus 
+```{r}
+set.seed(1)
+tdf_corpus = sample(corpusA)
+head(meta(tdf_corpus, "filter"))
+```
+```{r}
+set.seed(1)
+tdf_corpusB = sample(corpusB)
+head(meta(tdf_corpusB, "filter"))
+```
+
+Lets now take our random corpus and turn it into a document term matrix
+```{r}
+tdf_corpus2<-tm_map(tdf_corpus, content_transformer(function(x) iconv(enc2utf8(x), sub = "byte")))
+tdf_corpusB2<-tm_map(tdf_corpusB, content_transformer(function(x) iconv(enc2utf8(x), sub = "byte")))
+```
+
+```{r}
+removeSpecialChars <- function(x) gsub("[^a-zA-Z0-9 ]","",x)
+tdf_corpus3 <- tm_map(tdf_corpus2, removeSpecialChars)
+tdf_corpusB3 <- tm_map(tdf_corpusB2, removeSpecialChars)
+```
+
+It seems that all these transformations may corrupt the corpus, so this code should restore it allowing us to build the document term matrix
+```{r}
+tdf_corpus4 <- tm_map(tdf_corpus3, PlainTextDocument) #This action restores the corpus.
+tdf_corpusB4 <- tm_map(tdf_corpusB3, PlainTextDocument) #This action restores the corpus.
+```
+
+The term document matrix is finally built for both parts, we can proceed to clean the matrix as follows:
+-remove numbers
+-remove punctuation
+-remove stop words
+-remove extra white space
+```{r}
+#Easy ham vs spam
+  tdf_corpus4 <- tm_map(tdf_corpus4,removeNumbers) 
+  tdf_corpus4 <- tm_map(tdf_corpus4,str_replace_all,pattern = "[[:punct:]]", replacement = " ")
+  tdf_corpus4 <- tm_map(tdf_corpus4,removeWords, words = stopwords("en"))
+  tdf_corpus4 <- tm_map(tdf_corpus4, tolower)
+  tdf_corpus4 <- tm_map(tdf_corpus4, stemDocument)
+  tdf_corpus4 <- tm_map(tdf_corpus4, PlainTextDocument) 
+```
+```{r}
+#hard ham vs spam
+  tdf_corpusB4 <- tm_map(tdf_corpusB4,removeNumbers) 
+  tdf_corpusB4 <- tm_map(tdf_corpusB4,str_replace_all,pattern = "[[:punct:]]", replacement = " ")
+  tdf_corpusB4 <- tm_map(tdf_corpusB4,removeWords, words = stopwords("en"))
+  tdf_corpusB4 <- tm_map(tdf_corpusB4, tolower)
+  tdf_corpusB4 <- tm_map(tdf_corpusB4, stemDocument)
+  tdf_corpusB4 <- tm_map(tdf_corpusB4, PlainTextDocument) 
+```
+
+```{r}
+tdm <- TermDocumentMatrix(tdf_corpus4)
+tdm
+```
+```{r}
+tdmB <- TermDocumentMatrix(tdf_corpusB4)
+tdmB
+```
+
+We can reduce the dimension of the matrix by removing sparse terms 
+```{r}
+dtm <- DocumentTermMatrix(tdf_corpus4)
+dtm <- removeSparseTerms(dtm, 1 - (10/length(tdf_corpus4)))
+dtm
+```
+
+```{r}
+dtmB <- DocumentTermMatrix(tdf_corpusB4)
+dtmB <- removeSparseTerms(dtmB, 1 - (10/length(tdf_corpusB4)))
+dtmB
+```
+
+We now proceed to divide the data into a training set and testing set. Before getting to this step, we need to collect the labels using unlist from each corpus. 
+```{r}
+labels <- as.factor(unlist(meta(tdf_corpus4, "filter")[,1]))
+class(labels)
+```
+
+```{r}
+labelsB <- as.factor(unlist(meta(tdf_corpusB4, "filter")[,1]))
+class(labelsB)
+```
+
+Using the abilities of RTextTools, we can create a container with specific parameters on how to divide the data into a test and training set. A common partition is 70% vs 30%
+```{r}
+#Easy ham vs spam
+N <- length(labels)
+container <- create_container(dtm,
+              labels = labels,
+              trainSize = 1:1958,
+              testSize = 1959:N,
+              virgin = F)
+```
+
+```{r}
+#hard ham vs spam
+NB <- length(labelsB)
+containerB <- create_container(dtmB,
+              labels = labelsB,
+              trainSize = 1:1153,
+              testSize = 1154:NB,
+              virgin = F)
+```
+
+Now we can proceed to building some models to see if we can predict a document as being spam 
+The first model type is called a support vector machine (SVM). It is a supervised learning model used for classification and regression tasks. Mathematically, it contructs a hyperplane mapping which generates a classification function. 
+```{r}
+svm_model <- train_model(container, "SVM")
+```
+```{r}
+svm_modelB <- train_model(containerB, "SVM")
+```
+
+Lets evaluate the SVM
+```{r}
+svm_out <- classify_model(container, svm_model)
+```
+```{r}
+svm_outB <- classify_model(containerB, svm_modelB)
+```
+
+Out labels 
+```{r}
+labels_out <- data.frame(correct_label = labels[2798:N], svm = as.character(svm_out[,1]), stingsAsFactors = F)
+table(labels_out[,1] == labels_out[,2])
+prop.table(table(labels_out[,1] == labels_out[,2]))
+```
+
+The hard ham vs spam has a poor outcome 
+```{r}
+labels_outB <- data.frame(correct_label = labelsB[1648:NB], svm = as.character(svm_outB[,1]), stingsAsFactors = F)
+table(labels_outB[,1] == labels_outB[,2])
+prop.table(table(labels_outB[,1] == labels_outB[,2]))
+```
+
+Lets try a different model
+Lets try a decision tree model. It does the same task as the support vector machine.
+```{r}
+tree_model <- train_model(container, "TREE")
+```
+
+```{r}
+tree_modelB <- train_model(containerB, "TREE")
+```
+
+Lets evaluate the tree model 
+```{r}
+tree_out <- classify_model(container, tree_model)
+```
+
+```{r}
+tree_outB <- classify_model(containerB, tree_modelB)
+```
+
+Out Labels 
+```{r}
+labels_out_tree <- data.frame(correct_label = labels[2798:N], tree = as.character(tree_out[,1]), stingsAsFactors = F)
+table(labels_out_tree[,1] == labels_out_tree[,2])
+prop.table(table(labels_out_tree[,1] == labels_out_tree[,2]))
+```
+
+I am still getting the same poor result
+```{r}
+labels_out_treeB <- data.frame(correct_label = labelsB[1648:NB], tree = as.character(tree_outB[,1]), stingsAsFactors = F)
+table(labels_out_treeB[,1] == labels_out_treeB[,2])
+prop.table(table(labels_out_treeB[,1] == labels_out_treeB[,2]))
+```
+
+The last model we can build is the maximum entropy model. 
+```{r}
+max_model <- train_model(container, "MAXENT")
+```
+
+```{r}
+max_modelB <- train_model(containerB, "MAXENT")
+```
+
+Evaluate the model 
+```{r}
+max_out <- classify_model(container, max_model)
+```
+
+```{r}
+max_outB <- classify_model(containerB, max_modelB)
+```
+
+Out labels
+```{r}
+max_out_ent <- data.frame(correct_label = labels[2798:N], max_entropy = as.character(max_out[,1]), stingsAsFactors = F)
+table(max_out_ent[,1] == max_out_ent[,2])
+prop.table(table(max_out_ent[,1] == max_out_ent[,2]))
+```
+
+Max entropy model was slighty better 
+```{r, error=TRUE}
+max_out_entB <- data.frame(correct_label = labelsB[1648:NB], max_entropy = as.character(max_outB[,1]), stingsAsFactors = F)
+table(max_out_entB[,1] == max_out_entB[,2])
+prop.table(table(max_out_entB[,1] == max_out_entB[,2]))
+```
+
+Can we make a conclusion regarding which model was better for classification? 
+For easy ham vs spam, it looks like the SVM was the better performing model capturing more than 50% of the proper types. For hard ham vs spam, the max entropy model seemed to be the best performing. 
+
+We also have the ability to do some top level analysis using word clouds. This gives a visual cue into the type of content present in each corpus. 
+```{r}
+#Easy ham vs Spam corpus 
+wordcloud(tdf_corpus4, max.words = 200, random.order = FALSE, colors=c('red'))
+```
+
+```{r}
+#hard ham vs Spam corpus 
+wordcloud(tdf_corpusB4, max.words = 200, random.order = FALSE, colors=c('red'))
+```
+
